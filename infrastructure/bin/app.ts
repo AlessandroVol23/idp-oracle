@@ -20,8 +20,6 @@ new IdpStack(app, 'IdpStack', {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: process.env.CDK_DEFAULT_REGION ?? process.env.AWS_REGION ?? 'us-east-1',
   },
-  oracleConnectString: required('ORACLE_CONNECT_STRING'),
-  oracleUser: required('ORACLE_USER'),
   oraclePassword: required('ORACLE_PASSWORD'),
   bedrockModelId: required('BEDROCK_MODEL_ID'),
 });

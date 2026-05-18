@@ -1,11 +1,12 @@
--- Run this as the ADMIN of your Autonomous AI Database.
--- Creates the `idp` application user with the minimum privileges
--- to use DBMS_VECTOR / DBMS_VECTOR_CHAIN and to own JSON Duality Views.
-
+-- Run this against the FREEPDB1 PDB as a privileged user (SYSTEM on Oracle Free,
+-- ADMIN on OCI Autonomous AI). Creates the `idp` application user with the
+-- minimum privileges to use DBMS_VECTOR / DBMS_VECTOR_CHAIN and to own JSON
+-- Duality Views.
+--
 -- Replace <YOUR_IDP_PASSWORD> with the value you set in .env (ORACLE_PASSWORD).
+
 CREATE USER idp IDENTIFIED BY "<YOUR_IDP_PASSWORD>"
-  DEFAULT TABLESPACE DATA
-  QUOTA UNLIMITED ON DATA;
+  QUOTA UNLIMITED ON USERS;
 
 GRANT DB_DEVELOPER_ROLE TO idp;
 GRANT CREATE MINING MODEL TO idp;

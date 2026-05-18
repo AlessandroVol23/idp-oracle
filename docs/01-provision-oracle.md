@@ -1,91 +1,140 @@
-# Provisioning Oracle Autonomous AI Database 26ai (Always Free)
+# Provisioning Oracle Database 23ai Free on ECS Fargate
 
-This walkthrough creates the cloud database the rest of the tutorial assumes. Takes ~5 minutes.
+This walkthrough deploys Oracle Database 23ai Free as a Fargate service inside a private VPC, with EFS-backed persistent storage and an SSM bastion for migrations.
 
-## 1. Sign up for OCI Always Free
+> **Why 23ai instead of 26ai?** This codebase only depends on features that landed in 23ai (`VECTOR`, `DBMS_VECTOR_CHAIN`, JSON Duality Views, `VECTOR_DISTANCE`). The Free container distribution is well-tested and pulls anonymously from `container-registry.oracle.com`.
 
-Go to https://www.oracle.com/cloud/free/ and create a free OCI account. No credit card needed for Always Free resources.
+## What gets created
 
-## 2. Create the Autonomous Database
+- VPC (`10.42.0.0/16`), 2 AZs, 1 NAT gateway, public + private subnets.
+- ECS Fargate cluster with one task (4 vCPU, 16 GB) running `container-registry.oracle.com/database/free:latest-lite`.
+- EFS file system mounted at `/opt/oracle/oradata` (DB data) and `/opt/oracle/admin/FREE/dpdump` (ONNX uploads).
+- Cloud Map private DNS — Lambda reaches the DB at `oracle.idp.local:1521/FREEPDB1`.
+- An SSM-managed bastion (`t3.nano`) for port-forwarding from your laptop.
+- Lambda Function URL is now VPC-attached so it can reach the DB on the private SG.
 
-1. Sign in to the OCI console: https://cloud.oracle.com
-2. Navigate to **Oracle Database → Autonomous Database**.
-3. Click **Create Autonomous Database**.
-4. Settings:
-   - **Display name**: `idp`
-   - **Workload type**: **AI** (this is the 26ai option)
-   - **Always Free**: ✓
-   - **Database version**: 26ai (the latest available)
-   - **Password**: pick a strong ADMIN password and save it — you'll need it.
-5. **Network access** — pick one:
-   - **Secure access from allowed IPs and VCNs** (recommended for this tutorial — no wallet needed)
-     - Add your current public IP to the ACL.
-   - *(Alternative)* **Secure access from everywhere** — easier but exposes the DB endpoint to the world; only for short-lived demos.
-6. Wait ~2 minutes for the instance to come up.
+## 1. Configure `.env`
 
-## 3. Get the connect string
+```bash
+cp .env.example .env
+```
 
-1. From the DB detail page, click **Database connection**.
-2. **TLS authentication**: choose **TLS** (not mTLS).
-3. Copy the **TNS Name** for the `_high` service, e.g. `idp_high`.
-4. Copy the full connect string under **Connection Strings** — looks like:
-   ```
-   (description=(retry_count=20)(retry_delay=3)(address=(protocol=tcps)(port=1521)(host=adb.<region>.oraclecloud.com))(connect_data=(service_name=<long_id>_idp_high.adb.oraclecloud.com))(security=(ssl_server_dn_match=yes)))
-   ```
-5. Paste it into `.env` as `ORACLE_CONNECT_STRING`.
+Set:
 
-The TNS-style descriptor works with `node-oracledb` thin mode out of the box — no wallet, no `TNS_ADMIN`.
+- `ORACLE_PASSWORD` — strong password (min 12 chars, mixed case + digit + special). Used as the container's `ORACLE_PWD` (SYS/SYSTEM/PDBADMIN) **and** as the password for the `idp` user.
+- `BEDROCK_MODEL_ID`, `AWS_REGION` — your Bedrock setup.
+- Leave `ORACLE_CONNECT_STRING=localhost:1521/FREEPDB1` — that's the local end of the SSM port-forward you'll open in step 3.
 
-## 4. Create the `idp` application user
+## 2. Deploy the stack
 
-The repo migrations are owned by an `idp` user, not ADMIN.
+```bash
+pnpm cdk:deploy
+```
 
-1. From the DB detail page, click **Database actions** → **SQL**.
-2. Sign in as ADMIN with the password from step 2.
-3. Open `packages/db/migrations/000_bootstrap.sql` from this repo, paste it into the worksheet, **replace `<YOUR_IDP_PASSWORD>` with the password you want to use**, and run it.
-4. Set the same password as `ORACLE_PASSWORD` in `.env`. Set `ORACLE_USER=idp`.
+First deploy is slow (~10–15 min): VPC + NAT, EFS mount targets, Fargate pulling the ~3 GB Oracle image, then Oracle initializing FREEPDB1 on first boot.
+
+Watch the container come up:
+
+```bash
+aws logs tail /aws/ecs/IdpStack-... --follow
+# wait for: "DATABASE IS READY TO USE!"
+```
+
+Outputs include:
+- `BastionInstanceId` — for the SSM port-forward
+- `OracleConnectString` — what Lambda uses
+- `EcsClusterName`, `EcsDbServiceName` — for ECS exec
+
+## 3. Port-forward from your laptop to the DB
+
+In a long-lived terminal:
+
+```bash
+aws ssm start-session \
+  --target <BastionInstanceId> \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters '{"host":["oracle.idp.local"],"portNumber":["1521"],"localPortNumber":["1521"]}'
+```
+
+Leave this running. `localhost:1521` on your laptop now tunnels to the Fargate task's port 1521.
+
+## 4. Bootstrap the `idp` user
+
+The container's admin user is `system` (in the FREEPDB1 PDB). Connect as `system` once to create the `idp` application user. Easiest path with `sqlcl`:
+
+```bash
+sql system/"$ORACLE_PASSWORD"@localhost:1521/FREEPDB1
+SQL> @packages/db/migrations/000_bootstrap.sql
+SQL> exit
+```
+
+Replace `<YOUR_IDP_PASSWORD>` in `000_bootstrap.sql` with your `ORACLE_PASSWORD` value before running, or paste the file inline.
 
 ## 5. Run the schema migrations
 
-From the repo root with your `.env` populated:
-
 ```bash
-pnpm db:setup
+pnpm db:setup -- --skip-bootstrap
 ```
 
-This runs `001_schema.sql` and `002_duality_views.sql` as the `idp` user.
+This connects as `idp` (over the same port-forward) and runs `001_schema.sql` and `002_duality_views.sql`.
 
 ## 6. Load the ONNX embedding model
 
-26ai generates embeddings *inside the database* from an ONNX model that lives in the DB. We use `all-MiniLM-L6-v2` (384 dimensions).
-
-1. Download `all_MiniLM_L6_v2.onnx` from Oracle's pre-built model distribution. (Oracle publishes a packaged ONNX file ready for `DBMS_VECTOR.LOAD_ONNX_MODEL`.)
-2. Upload the file into the `DATA_PUMP_DIR` of your Autonomous Database. Easiest path: **Database Actions → Data Studio → Data Load → Cloud Store** or via the Object Storage console. (See the Autonomous DB docs for the exact upload UI flow.)
-3. Run:
-   ```bash
-   pnpm db:onnx
-   ```
-4. Expected output:
-   ```
-   OK. Embedding dimension = 384
-   ```
-
-## 7. Smoke test from Node
+The model file has to live in the container's `DATA_PUMP_DIR` (mounted on EFS at `/opt/oracle/admin/FREE/dpdump`). Use ECS Exec to download it directly into the running task:
 
 ```bash
-pnpm dev:api
-# in another terminal:
-curl http://localhost:8787/health
+TASK=$(aws ecs list-tasks --cluster <EcsClusterName> --service-name <EcsDbServiceName> --query 'taskArns[0]' --output text)
+
+aws ecs execute-command \
+  --cluster <EcsClusterName> \
+  --task "$TASK" \
+  --container oracle \
+  --interactive \
+  --command "bash -lc 'curl -L -o /opt/oracle/admin/FREE/dpdump/all_MiniLM_L6_v2.onnx <ORACLE_ONNX_MODEL_URL>'"
+```
+
+(Replace `<ORACLE_ONNX_MODEL_URL>` with the download URL from Oracle's pre-built ONNX model distribution. The file is ~80 MB.)
+
+Then load it into the DB:
+
+```bash
+pnpm db:onnx
+```
+
+Expected output: `OK. Embedding dimension = 384`.
+
+## 7. Smoke test
+
+```bash
+curl https://<ApiUrl>/health
 # → {"ok":true}
 ```
 
-If you can hit `/health`, the connection pool initialized — meaning credentials + ACL + connect string are all good.
+The Lambda is in the VPC and reaches the DB through Cloud Map DNS. If health passes, the connection pool initialized.
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|
-| `ORA-12506` / TLS handshake errors | Your IP isn't in the ACL. Edit the DB's network config and add it. |
-| `ORA-01017 invalid username/password` | Check `.env` matches the password you set in `000_bootstrap.sql`. |
-| `ORA-00942 table or view does not exist` | Migrations didn't run, or you're connected as the wrong user. Run `pnpm db:setup` with `ORACLE_USER=idp`. |
-| `pnpm db:onnx` fails with file-not-found | The ONNX file isn't in `DATA_PUMP_DIR`. List directory contents: `SELECT * FROM table(dbms_lock.sleep(0)) -- placeholder`, then use the Database Actions Data Load UI to upload. |
+| `ORA-12514` / `service does not exist` | DB still booting. Tail the Fargate logs and wait for "DATABASE IS READY TO USE!". |
+| `ORA-01017 invalid username/password` | `ORACLE_PASSWORD` in `.env` doesn't match the password baked into the running task. Update `.env` and `cdk deploy`. |
+| `ORA-00942 table or view does not exist` | Migrations didn't run as `idp`, or you skipped step 5. |
+| `ORA-29913` / "file not found" on `db:onnx` | The `.onnx` file isn't in the dpdump EFS mount. Re-run the ECS Exec curl in step 6 and verify with `aws ecs execute-command ... --command "ls /opt/oracle/admin/FREE/dpdump"`. |
+| `pnpm db:setup` hangs | The SSM port-forward dropped. Re-run step 3. |
+| Lambda timeouts on `/health` | Lambda VPC ENIs not yet warm, or DB SG missing the ingress rule for the Lambda SG. Check the `DbSg` ingress rules in the console. |
+
+## Cost notes
+
+Rough monthly cost in `us-east-1`, on at all times:
+
+| Resource | ~$/mo |
+|---|---|
+| Fargate task (4 vCPU / 16 GB, 24×7) | ~$120 |
+| NAT Gateway (1 AZ) | ~$33 |
+| EFS (Elastic throughput, ~5 GB used) | ~$2 |
+| Bastion (t3.nano) | ~$4 |
+| **Total** | **~$160** |
+
+Stop the Fargate service (`aws ecs update-service ... --desired-count 0`) when you're not using it. EFS data persists across restarts.
+
+Tear down with `pnpm cdk:destroy`.
