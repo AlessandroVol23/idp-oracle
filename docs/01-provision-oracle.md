@@ -88,38 +88,28 @@ This runs in two phases:
 1. As ADMIN, runs `000_bootstrap.sql` (creates the `idp` user, grants `DB_DEVELOPER_ROLE`, `EXECUTE` on `DBMS_VECTOR` / `DBMS_VECTOR_CHAIN`, `READ, WRITE` on `DATA_PUMP_DIR`).
 2. As `idp`, runs `001_schema.sql` (tables, vector index, text index, triggers) and `002_duality_views.sql` (one duality view per doc type + a no-fields top-level view).
 
-After it finishes, `pnpm tsx scripts/verify-schema.ts` confirms all 11 objects exist.
+After it finishes, you should see `All migrations applied.` and the duality views logged as `✓ CREATE OR REPLACE JSON RELATIONAL DUALITY VIEW ...`.
 
 ## 7. Load the ONNX embedding model
 
-The repo automates both the download and the load:
+One command does both the download and the load:
 
 ```bash
-pnpm tsx scripts/download-onnx-to-db.ts   # DBMS_CLOUD.GET_OBJECT pulls all_MiniLM_L12_v2.onnx into DATA_PUMP_DIR
-pnpm db:onnx                              # DBMS_VECTOR.LOAD_ONNX_MODEL registers it as "doc_embedder"
-```
-
-Expected output of the second command:
-
-```
-OK. Embedding dimension = 384
-```
-
-> The L12 file is what Oracle publishes as a pre-built ONNX model today. It produces the same 384-dim output as L6, so the schema is unchanged. If you ever need a different file name, set `ONNX_MODEL_FILE` in `.env`.
-
-## 8. Smoke test
-
-```bash
-pnpm tsx scripts/ping-db.ts
+pnpm db:setup-onnx
 ```
 
 Expected output:
 
 ```
-Connected. Version: Oracle AI Database 26ai Enterprise Edition Release 23.26.2.2.0 - Production
+Phase 1: ADMIN pulls all_MiniLM_L12_v2.onnx into DATA_PUMP_DIR
+  ✓ all_MiniLM_L12_v2.onnx = 133322334 bytes
+
+Phase 2: idp loads "doc_embedder" from DATA_PUMP_DIR
+  ✓ model doc_embedder loaded
+  ✓ embedding dimension = 384
 ```
 
-If that prints, your credentials, wallet, and network path are all good.
+> The L12 file is what Oracle publishes as a pre-built ONNX model today. It produces the same 384-dim output as L6, so the schema is unchanged. If you ever need a different file name, set `ONNX_MODEL_FILE` in `.env`.
 
 Next: set up OCI Generative AI for in-database classify + extract. See [02-provision-oci-genai.md](./02-provision-oci-genai.md).
 

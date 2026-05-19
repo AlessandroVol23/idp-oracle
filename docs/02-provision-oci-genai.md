@@ -6,7 +6,7 @@ Cost: OCI Generative AI is pay-per-token. Cohere Command R+ is ~$3 input + $15 o
 
 Takes ~3 minutes.
 
-## 1. Create an API key for your OCI user
+## 1. Create the API key and grab four of the five values from one screen
 
 OCI console → top-right profile avatar → **My profile**.
 
@@ -15,27 +15,38 @@ You will land on a page with tabs (`Details`, `My groups`, `My requests`, `My re
 In the **API keys** section:
 
 1. **Add API key** → **Generate API key pair**.
-2. **Download private key** — save to `~/.oci/idp.pem` (or any stable path; you'll point `.env` at it). The public key is uploaded to OCI automatically.
+2. **Download private key** — save to `~/.oci/idp.pem` (or any stable path; you'll point `.env` at it). The public key is uploaded automatically.
 3. **Add**.
-4. The new key row will show a **fingerprint** like `6a:bc:31:32:11:b8:2a:08:7c:9b:62:50:83:4d:46:40`. Copy it.
+
+After the key is added, OCI shows a **configuration file preview** on the same screen. It looks like this:
+
+```ini
+[DEFAULT]
+user=ocid1.user.oc1..aaaaaaaa....
+fingerprint=6a:bc:31:32:11:b8:2a:08:7c:9b:62:50:83:4d:46:40
+tenancy=ocid1.tenancy.oc1..aaaaaaaa....
+region=eu-frankfurt-1
+key_file=<path to your private keyfile> # TODO
+```
+
+This single block gives you **four of the five values** at once:
+
+| `.env` variable | Where in the preview |
+|---|---|
+| `OCI_USER_OCID` | `user=...` |
+| `OCI_FINGERPRINT` | `fingerprint=...` |
+| `OCI_TENANCY_OCID` | `tenancy=...` |
+| `OCI_GENAI_REGION` | `region=...` (only if you want a region other than the default `eu-frankfurt-1`) |
+
+The fifth value is the **compartment OCID**. For Always Free / single-user setups, use the **root compartment**, whose OCID is identical to the tenancy OCID. (Multi-team setups: Identity & Security → Compartments → pick a sub-compartment.)
+
+The sixth `.env` line, `OCI_PRIVATE_KEY_PATH`, points at the `.pem` you downloaded in step 2.
 
 Tighten the key's permissions on disk:
 
 ```bash
 chmod 600 ~/.oci/idp.pem
 ```
-
-## 2. Collect OCIDs
-
-Five values needed:
-
-| Variable | Where |
-|---|---|
-| `OCI_USER_OCID` | Profile page → **Details** tab → **OCID** field → click **Copy** (the value shown is truncated; the clipboard has the full OCID). |
-| `OCI_TENANCY_OCID` | Profile dropdown → **Tenancy: <yourname>** → tenancy details page → OCID at top. |
-| `OCI_COMPARTMENT_OCID` | The root compartment OCID is identical to `OCI_TENANCY_OCID`. For the article use the root. (For multi-team setups: Identity & Security → Compartments → pick a sub-compartment.) |
-| `OCI_FINGERPRINT` | From step 1. |
-| `OCI_PRIVATE_KEY_PATH` | The local path to the `.pem` file from step 1, e.g. `/Users/you/.oci/idp.pem`. |
 
 ## 3. Populate `.env`
 
@@ -53,7 +64,16 @@ OCI_GENAI_MODEL=cohere.command-r-plus-08-2024
 
 `OCI_GENAI_REGION` must be a region where OCI Generative AI is enabled. Frankfurt, Chicago, Phoenix, London, and São Paulo all work. The inference endpoint is derived as `https://inference.generativeai.<region>.oci.oraclecloud.com`.
 
-`OCI_GENAI_MODEL` is the chat model ID. Cohere Command R+ is a good default for structured extraction. Meta Llama 3.x and other models work too; check the OCI console under **Analytics & AI → Generative AI** for what's available in your region.
+`OCI_GENAI_MODEL` is the chat model ID. Available in `eu-frankfurt-1` (current as of writing — check OCI console → **Analytics & AI → Generative AI → Playground** for the live list in your region):
+
+| Model | Approx. price (per M tokens) | Notes |
+|---|---|---|
+| `cohere.command-r-plus-08-2024` | $3 in / $15 out | Default in this repo. Reliable structured JSON output for invoices / contracts / CVs. |
+| `cohere.command-r-08-2024` | $0.50 in / $1.50 out | 6× cheaper. Less consistent on deeply-nested schemas (`keyClauses[]`, `lineItems[]`), so the Zod retry triggers more often. Worth trying if cost matters. |
+| `meta.llama-3.3-70b-instruct` | ~$0.60 combined | Strong general model. JSON output is decent but you'll lean on the retry more than with Cohere. |
+| `meta.llama-3.1-405b-instruct` | ~$5 combined | Largest available. Overkill for typed extraction on short documents. |
+
+Switching is a one-line change in `.env` followed by an API restart — no code changes needed. The same prompt + JSON Schema gets sent to whichever model you point at.
 
 ## 4. Register the credential inside the database
 
