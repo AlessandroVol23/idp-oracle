@@ -8,3 +8,6 @@ cdk.out
 .DS_Store
 *.log
 .vite
+.playwright-cli/
+.claude/scheduled_tasks.lock
+.claude/worktrees/

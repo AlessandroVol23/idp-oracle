@@ -4,7 +4,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@aws-sdk/client-bedrock-runtime": "^3.700.0",
     "@faker-js/faker": "^9.2.0",
     "@idp/core": "workspace:*",
     "@idp/db": "workspace:*",

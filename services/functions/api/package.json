@@ -10,10 +10,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
-    "@idp/bedrock": "workspace:*",
     "@idp/core": "workspace:*",
-    "@idp/db": "workspace:*",
-    "@idp/hono": "workspace:*",
     "@idp/logger": "workspace:*",
     "@idp/schemas": "workspace:*",
     "@idp/shared": "workspace:*",

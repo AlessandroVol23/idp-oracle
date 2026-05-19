@@ -18,10 +18,17 @@ const app = new App();
 new IdpStack(app, 'IdpStack', {
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
-    region: process.env.CDK_DEFAULT_REGION ?? process.env.AWS_REGION ?? 'us-east-1',
+    region: process.env.CDK_DEFAULT_REGION ?? 'us-east-1',
   },
   oracleConnectString: required('ORACLE_CONNECT_STRING'),
   oracleUser: required('ORACLE_USER'),
   oraclePassword: required('ORACLE_PASSWORD'),
-  bedrockModelId: required('BEDROCK_MODEL_ID'),
+  oracleWalletLocation: required('ORACLE_WALLET_LOCATION'),
+  oracleWalletPassword: required('ORACLE_WALLET_PASSWORD'),
+  ociUserOcid: required('OCI_USER_OCID'),
+  ociTenancyOcid: required('OCI_TENANCY_OCID'),
+  ociCompartmentOcid: required('OCI_COMPARTMENT_OCID'),
+  ociFingerprint: required('OCI_FINGERPRINT'),
+  ociGenaiRegion: process.env.OCI_GENAI_REGION ?? 'eu-frankfurt-1',
+  ociGenaiModel: process.env.OCI_GENAI_MODEL ?? 'cohere.command-r-plus-08-2024',
 });

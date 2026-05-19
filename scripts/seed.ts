@@ -9,7 +9,7 @@ const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 120_000;
 
 interface DocResult {
-  _id: string;
+  id: string;
   status: string;
   docType: string;
   failedReason: string | null;
@@ -28,13 +28,13 @@ async function uploadAndWait(filePath: string, base: string): Promise<DocResult>
   if (!res.ok) {
     throw new Error(`upload failed (${res.status}): ${await res.text()}`);
   }
-  const created = (await res.json()) as { _id: string };
+  const created = (await res.json()) as { id: string };
 
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const poll = await fetch(`${base}/documents/${created._id}`);
+    const poll = await fetch(`${base}/documents/${created.id}`);
     const doc = (await poll.json()) as {
-      _id: string;
+      id: string;
       status: string;
       docType: string;
       failedReason: string | null;

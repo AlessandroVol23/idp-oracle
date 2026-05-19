@@ -1,10 +1,7 @@
 import oracledb from 'oracledb';
 import { withConnection } from '../pool.js';
-import type {
-  InvoiceFields,
-  ContractFields,
-  CvFields,
-} from '@idp/schemas';
+import { fieldsPayloadRowSchema, type FieldsPayload } from '../schemas.js';
+import type { InvoiceFields, ContractFields, CvFields } from '@idp/schemas';
 
 async function upsertFields(documentId: string, payload: object): Promise<void> {
   await withConnection(async (conn) => {
@@ -20,24 +17,21 @@ async function upsertFields(documentId: string, payload: object): Promise<void> 
   });
 }
 
-interface DualityFieldsRow {
-  ID: Buffer;
-  DOC_TYPE: string;
-  PAYLOAD: string;
-}
-
-async function fetchFieldsView(view: string, documentId: string): Promise<object | null> {
+async function fetchFieldsForDoc(documentId: string): Promise<FieldsPayload | null> {
   return withConnection(async (conn) => {
-    const result = await conn.execute<DualityFieldsRow>(
-      `SELECT JSON_SERIALIZE(${view}.DATA RETURNING VARCHAR2 PRETTY) AS PAYLOAD
-       FROM ${view}
-       WHERE JSON_VALUE(${view}.DATA, '$._id') = :id`,
+    const result = await conn.execute<Record<string, unknown>>(
+      `SELECT JSON_SERIALIZE(payload RETURNING CLOB) AS PAYLOAD
+       FROM document_fields
+       WHERE document_id = HEXTORAW(:id)`,
       { id: documentId },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      {
+        outFormat: oracledb.OUT_FORMAT_OBJECT,
+        fetchInfo: { PAYLOAD: { type: oracledb.STRING } },
+      },
     );
     const row = result.rows?.[0];
-    if (!row) return null;
-    return JSON.parse(row.PAYLOAD);
+    if (!row || row.PAYLOAD == null) return null;
+    return fieldsPayloadRowSchema.parse(row);
   });
 }
 
@@ -52,13 +46,13 @@ export const FieldsRepo = {
     return upsertFields(id, fields);
   },
 
-  getInvoice(id: string): Promise<object | null> {
-    return fetchFieldsView('invoice_dv', id);
+  getInvoice(id: string): Promise<FieldsPayload | null> {
+    return fetchFieldsForDoc(id);
   },
-  getContract(id: string): Promise<object | null> {
-    return fetchFieldsView('contract_dv', id);
+  getContract(id: string): Promise<FieldsPayload | null> {
+    return fetchFieldsForDoc(id);
   },
-  getCv(id: string): Promise<object | null> {
-    return fetchFieldsView('cv_dv', id);
+  getCv(id: string): Promise<FieldsPayload | null> {
+    return fetchFieldsForDoc(id);
   },
 };

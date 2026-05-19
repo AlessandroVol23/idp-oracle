@@ -17,13 +17,13 @@ SELECT JSON {
   'createdAt'        : d.created_at,
   'updatedAt'        : d.updated_at,
   'fields'           : (
-    SELECT JSON_TRANSFORM(f.payload, KEEP '$.*')
+    SELECT f.payload
     FROM document_fields f WITH UPDATE
     WHERE f.document_id = d.id
   )
 }
 FROM documents d WITH UPDATE
-WHERE d.doc_type = 'invoice';
+WHERE d.doc_type = 'invoice' WITH CHECK OPTION;
 
 CREATE OR REPLACE JSON RELATIONAL DUALITY VIEW contract_dv AS
 SELECT JSON {
@@ -39,13 +39,13 @@ SELECT JSON {
   'createdAt'        : d.created_at,
   'updatedAt'        : d.updated_at,
   'fields'           : (
-    SELECT JSON_TRANSFORM(f.payload, KEEP '$.*')
+    SELECT f.payload
     FROM document_fields f WITH UPDATE
     WHERE f.document_id = d.id
   )
 }
 FROM documents d WITH UPDATE
-WHERE d.doc_type = 'contract';
+WHERE d.doc_type = 'contract' WITH CHECK OPTION;
 
 CREATE OR REPLACE JSON RELATIONAL DUALITY VIEW cv_dv AS
 SELECT JSON {
@@ -61,13 +61,13 @@ SELECT JSON {
   'createdAt'        : d.created_at,
   'updatedAt'        : d.updated_at,
   'fields'           : (
-    SELECT JSON_TRANSFORM(f.payload, KEEP '$.*')
+    SELECT f.payload
     FROM document_fields f WITH UPDATE
     WHERE f.document_id = d.id
   )
 }
 FROM documents d WITH UPDATE
-WHERE d.doc_type = 'cv';
+WHERE d.doc_type = 'cv' WITH CHECK OPTION;
 
 CREATE OR REPLACE JSON RELATIONAL DUALITY VIEW document_dv AS
 SELECT JSON {

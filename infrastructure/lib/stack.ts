@@ -12,7 +12,6 @@ import {
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { Function, FunctionUrlAuthType, Runtime, Architecture, InvokeMode } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction, OutputFormat } from 'aws-cdk-lib/aws-lambda-nodejs';
-import { PolicyStatement, Effect } from 'aws-cdk-lib/aws-iam';
 import { RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,8 +22,17 @@ export interface IdpStackProps extends StackProps {
   oracleConnectString: string;
   oracleUser: string;
   oraclePassword: string;
-  bedrockModelId: string;
+  oracleWalletLocation: string;
+  oracleWalletPassword: string;
+  ociUserOcid: string;
+  ociTenancyOcid: string;
+  ociCompartmentOcid: string;
+  ociFingerprint: string;
+  ociGenaiRegion: string;
+  ociGenaiModel: string;
 }
+
+const LAMBDA_WALLET_PATH = '/var/task/wallet';
 
 export class IdpStack extends Stack {
   constructor(scope: Construct, id: string, props: IdpStackProps) {
@@ -47,27 +55,30 @@ export class IdpStack extends Stack {
         mainFields: ['module', 'main'],
         banner:
           "import { createRequire as topLevelCreateRequire } from 'module'; const require = topLevelCreateRequire(import.meta.url);",
+        commandHooks: {
+          beforeBundling: () => [],
+          beforeInstall: () => [],
+          afterBundling: (_inputDir: string, outputDir: string) => [
+            `mkdir -p ${outputDir}/wallet`,
+            `cp -R ${props.oracleWalletLocation}/. ${outputDir}/wallet/`,
+          ],
+        },
       },
       environment: {
         ORACLE_CONNECT_STRING: props.oracleConnectString,
         ORACLE_USER: props.oracleUser,
         ORACLE_PASSWORD: props.oraclePassword,
-        BEDROCK_MODEL_ID: props.bedrockModelId,
+        ORACLE_WALLET_LOCATION: LAMBDA_WALLET_PATH,
+        ORACLE_WALLET_PASSWORD: props.oracleWalletPassword,
+        OCI_USER_OCID: props.ociUserOcid,
+        OCI_TENANCY_OCID: props.ociTenancyOcid,
+        OCI_COMPARTMENT_OCID: props.ociCompartmentOcid,
+        OCI_FINGERPRINT: props.ociFingerprint,
+        OCI_GENAI_REGION: props.ociGenaiRegion,
+        OCI_GENAI_MODEL: props.ociGenaiModel,
         NODE_OPTIONS: '--enable-source-maps',
       },
     });
-
-    const region = props.env?.region ?? this.region;
-    apiFn.addToRolePolicy(
-      new PolicyStatement({
-        effect: Effect.ALLOW,
-        actions: ['bedrock:InvokeModel'],
-        resources: [
-          `arn:aws:bedrock:${region}::foundation-model/${props.bedrockModelId}`,
-          `arn:aws:bedrock:*::foundation-model/${props.bedrockModelId}`,
-        ],
-      }),
-    );
 
     const fnUrl = apiFn.addFunctionUrl({
       authType: FunctionUrlAuthType.NONE,

@@ -24,7 +24,7 @@ function UploadPage() {
     mutationFn: api.uploadDocument,
     onSuccess: (data, file) => {
       setEntries((prev) =>
-        prev.map((e) => (e.filename === file.name && !e.documentId ? { ...e, documentId: data._id } : e)),
+        prev.map((e) => (e.filename === file.name && !e.documentId ? { ...e, documentId: data.id } : e)),
       );
       queryClient.invalidateQueries({ queryKey: ['documents'] });
     },

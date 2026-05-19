@@ -41,13 +41,13 @@ function DocumentDetailPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="p-0">
           <object
-            data={api.fileUrl(doc._id)}
+            data={api.fileUrl(doc.id)}
             type={doc.mimeType}
             className="h-[800px] w-full rounded-lg"
           >
             <p className="p-4 text-sm text-slate-600">
               Cannot render PDF.{' '}
-              <a className="underline" href={api.fileUrl(doc._id)}>
+              <a className="underline" href={api.fileUrl(doc.id)}>
                 Download
               </a>
             </p>
@@ -55,6 +55,17 @@ function DocumentDetailPage() {
         </Card>
 
         <div className="space-y-4">
+          {doc.summary && (
+            <Card>
+              <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                In-DB summary
+                <span className="ml-2 font-normal text-slate-400 normal-case tracking-normal">
+                  via <code>DBMS_VECTOR_CHAIN.UTL_TO_SUMMARY</code>
+                </span>
+              </h3>
+              <p className="whitespace-pre-line text-sm text-slate-700">{doc.summary}</p>
+            </Card>
+          )}
           {doc.fields ? (
             doc.docType === 'invoice' ? (
               <InvoiceView fields={doc.fields as InvoiceFields} />

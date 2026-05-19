@@ -14,7 +14,8 @@
     "@idp/logger": "workspace:*",
     "@idp/schemas": "workspace:*",
     "@idp/shared": "workspace:*",
-    "oracledb": "^6.7.0"
+    "oracledb": "^6.7.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/oracledb": "^6.5.2",

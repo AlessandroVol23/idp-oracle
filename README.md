@@ -1,4 +1,4 @@
-# Intelligent Document Processor — Oracle Database 26ai + AWS
+# Intelligent Document Processor — Oracle Database 26ai
 
 Companion code for the article *Build an Intelligent Document Processor in One Data Store*.
 
@@ -7,12 +7,13 @@ Documents (invoices, contracts, CVs) go through this pipeline:
 1. **Upload** to a Hono API running on Lambda (Function URL).
 2. The file is stored as a `BLOB` in Oracle Database 26ai.
 3. `DBMS_VECTOR_CHAIN.UTL_TO_TEXT` extracts text **inside the database**.
-4. **AWS Bedrock (Claude Sonnet)** classifies the document and extracts typed JSON fields.
-5. Fields are written through a **JSON Duality View** — one row in `documents`, one in `document_fields`.
-6. `DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDINGS` generates a 384-dim vector **inside the database** from an ONNX model loaded into Oracle.
-7. The frontend reads the doc, renders fields, and shows similar documents via `VECTOR_DISTANCE`.
+4. `DBMS_VECTOR_CHAIN.UTL_TO_SUMMARY` generates a deterministic gist **inside the database**.
+5. `DBMS_VECTOR_CHAIN.UTL_TO_GENERATE_TEXT` calls **OCI Generative AI** (Cohere Command R+) **from the database** to classify the document and extract typed JSON fields.
+6. Fields are written through a **JSON Duality View** — one row in `documents`, one in `document_fields`.
+7. `VECTOR_EMBEDDING` generates a 384-dim vector **inside the database** from an ONNX model loaded into Oracle.
+8. The frontend reads the doc, renders fields, and shows similar documents via `VECTOR_DISTANCE`.
 
-Everything *about* the document lives in one Oracle 26ai instance: BLOB + extracted text + structured JSON + vector. AWS provides only compute and the LLM.
+Everything *about* the document lives in one Oracle 26ai instance — BLOB + extracted text + structured JSON + vector — and every AI step either runs inside the Oracle process or is initiated from it via `DBMS_VECTOR_CHAIN`. AWS provides only compute (Lambda + S3 + CloudFront).
 
 > **Demo only.** The Lambda Function URL has no auth. The `.env` file is the only source of secrets. Do not expose this stack publicly.
 
@@ -20,8 +21,8 @@ Everything *about* the document lives in one Oracle 26ai instance: BLOB + extrac
 
 - Node 20+, pnpm 10+
 - An OCI Free account with an **Autonomous AI Database 26ai** (Always Free tier)
-- An AWS account with **Bedrock model access** for `anthropic.claude-3-5-sonnet-20241022-v2:0`
-- `aws` CLI configured with credentials that can deploy CDK and invoke Bedrock
+- An OCI **API key** under your user (see *OCI Generative AI setup* below)
+- `aws` CLI configured if you want to deploy the Lambda/S3/CloudFront stack
 
 ## Quickstart
 
@@ -33,26 +34,36 @@ pnpm install
 
 # 3. Configure secrets
 cp .env.example .env
-# Fill in ORACLE_CONNECT_STRING, ORACLE_USER, ORACLE_PASSWORD, BEDROCK_MODEL_ID, AWS_REGION
+# Fill in ORACLE_* values, OCI_* values, and the path to your OCI private key
 
 # 4. Bootstrap the database (creates user, schema, Duality Views)
-# Open Oracle SQL Developer Web (or sqlcl) connected as ADMIN, run:
-#   packages/db/migrations/000_bootstrap.sql
-# Then connect as the idp user and run the rest:
 pnpm db:setup
 
-# 5. Upload the ONNX embedding model into Oracle.
-# - Download all_MiniLM_L6_v2.onnx from Oracle's model distribution
-# - Put it in DATA_PUMP_DIR (or set ONNX_MODEL_FILE to its name there)
-pnpm db:onnx
+# 5. Register the OCI Generative AI credential inside the database
+pnpm db:setup-oci-credential
 
-# 6. Run locally
+# 6. Upload the ONNX embedding model into Oracle
+pnpm tsx scripts/download-onnx-to-db.ts   # pulls the model via DBMS_CLOUD.GET_OBJECT
+pnpm db:onnx                              # loads it as Oracle ONNX model "doc_embedder"
+
+# 7. Run locally
 pnpm dev:api   # in one terminal, Hono on :8787
 pnpm dev       # in another, Vite on :5173
 
-# 7. Seed the demo with the committed sample PDFs
+# 8. Seed the demo with the committed sample PDFs
 pnpm seed
 ```
+
+## OCI Generative AI setup
+
+`DBMS_VECTOR_CHAIN.UTL_TO_GENERATE_TEXT` calls OCI Generative AI from the database using an OCI API key.
+
+1. OCI console → your profile → **Tokens and keys** → **Add API key** → *Generate API key pair* → download the private key (`.pem`).
+2. Copy the **fingerprint** from the newly added key.
+3. Copy your **user OCID** (Details tab) and **tenancy OCID** (profile dropdown → Tenancy).
+4. Use the **root compartment OCID** (same as tenancy OCID) or any compartment OCID.
+5. Drop them all into `.env` (`OCI_USER_OCID`, `OCI_TENANCY_OCID`, `OCI_COMPARTMENT_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY_PATH`).
+6. Run `pnpm db:setup-oci-credential` — it grants the required privileges to the `idp` user, opens the outbound network ACL to the OCI Gen AI host, and registers the credential as `OCI_CRED` inside the database.
 
 ## Deploying to AWS
 
@@ -76,16 +87,14 @@ Tear down with `pnpm cdk:destroy`.
 
 ```
 apps/web                — Vite + React + TanStack SPA
-packages/core           — Ingest pipeline orchestrator
-packages/db             — oracledb pool + repositories + .sql migrations
-packages/bedrock        — Bedrock Runtime wrapper (classify + extract)
-packages/schemas        — Zod schemas per doc type
-packages/hono           — Hono middleware
+packages/core           — Ingest pipeline orchestrator + documents service
+packages/db             — oracledb pool + repositories + Zod row schemas + in-DB LLM calls + .sql migrations
+packages/schemas        — Zod schemas per doc type (used by the in-DB LLM call to validate JSON output)
 packages/logger         — JSON logger
 packages/shared         — Enums + constants
 services/functions/api  — Hono Lambda handler
 infrastructure          — CDK single stack
-scripts/                — Sample-doc generator, db-setup, onnx upload, seed
+scripts/                — Sample-doc generator, db-setup, OCI credential setup, ONNX upload, seed
 samples/                — Committed sample PDFs (generated by scripts/generate-sample-docs.ts)
 docs/                   — Provisioning + architecture
 ```
@@ -103,9 +112,10 @@ docs/                   — Provisioning + architecture
 |---|---|
 | `pnpm samples` | Re-generate the sample PDFs (deterministic with `--seed`) |
 | `pnpm db:setup` | Run migrations against the configured DB |
+| `pnpm db:setup-oci-credential` | Grant privileges to idp, open network ACL, register OCI Gen AI credential, smoke-test |
 | `pnpm db:onnx` | Load the ONNX embedding model into Oracle |
 | `pnpm seed` | Upload every sample PDF to the API and wait for ingest |
 | `pnpm dev` | Run the SPA locally on :5173 |
 | `pnpm dev:api` | Run the Hono API locally on :8787 |
-| `pnpm cdk:deploy` | Deploy the AWS stack |
+| `pnpm cdk:deploy` | Deploy the Lambda + S3 + CloudFront stack |
 | `pnpm typecheck` | Typecheck every workspace package |

@@ -18,7 +18,7 @@ export const EMBEDDING_MODEL_NAME = 'doc_embedder';
 export const MAX_UPLOAD_BYTES = 6 * 1024 * 1024;
 
 export interface DocumentEnvelope {
-  _id: string;
+  id: string;
   docType: DocType;
   status: DocStatus;
   originalFilename: string;
@@ -29,4 +29,5 @@ export interface DocumentEnvelope {
   failedReason: string | null;
   createdAt: string;
   updatedAt: string;
+  summary: string | null;
 }

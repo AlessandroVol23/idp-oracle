@@ -14,6 +14,12 @@ async function main() {
     user: process.env.ORACLE_USER!,
     password: process.env.ORACLE_PASSWORD!,
     connectString: process.env.ORACLE_CONNECT_STRING!,
+    ...(process.env.ORACLE_WALLET_LOCATION
+      ? { walletLocation: process.env.ORACLE_WALLET_LOCATION }
+      : {}),
+    ...(process.env.ORACLE_WALLET_PASSWORD
+      ? { walletPassword: process.env.ORACLE_WALLET_PASSWORD }
+      : {}),
   });
 
   try {
@@ -42,7 +48,7 @@ async function main() {
 
     console.log('Verifying with a sample VECTOR_EMBEDDING call…');
     const r = await conn.execute<{ DIM: number }>(
-      `SELECT VECTOR_DIMENSION(VECTOR_EMBEDDING(${EMBEDDING_MODEL_NAME} USING 'hello world' AS data)) AS DIM FROM DUAL`,
+      `SELECT VECTOR_DIMENSION_COUNT(VECTOR_EMBEDDING(${EMBEDDING_MODEL_NAME} USING 'hello world' AS data)) AS DIM FROM DUAL`,
       {},
       { outFormat: oracledb.OUT_FORMAT_OBJECT },
     );

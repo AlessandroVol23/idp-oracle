@@ -1,5 +1,4 @@
-import { DocumentsRepo, FieldsRepo } from '@idp/db';
-import { classify, extractFields } from '@idp/bedrock';
+import { DocumentsRepo, FieldsRepo, classifyInDb, extractFieldsInDb } from '@idp/db';
 import { logger } from '@idp/logger';
 import { isExtractable } from '@idp/schemas';
 import type { DocStatus } from '@idp/shared';
@@ -20,13 +19,21 @@ export async function ingestDocument(documentId: string): Promise<DocStatus> {
         await DocumentsRepo.updateStatus(documentId, 'failed', 'no_text_extracted');
         return 'failed';
       }
+      try {
+        log.info('summarizing via UTL_TO_SUMMARY');
+        await DocumentsRepo.generateSummary(documentId);
+      } catch (err) {
+        log.warn('UTL_TO_SUMMARY failed, continuing without summary', {
+          error: (err as Error).message,
+        });
+      }
       await DocumentsRepo.updateStatus(documentId, 'text_extracted');
       doc = (await DocumentsRepo.findById(documentId))!;
     }
 
     if (doc.status === 'text_extracted') {
-      log.info('classifying with bedrock');
-      const result = await classify(doc.extractedText ?? '');
+      log.info('classifying via UTL_TO_GENERATE_TEXT');
+      const result = await classifyInDb(doc.extractedText ?? '');
       log.info('classified', { docType: result.docType, confidence: result.confidence });
       await DocumentsRepo.updateDocType(documentId, result.docType);
       await DocumentsRepo.updateStatus(documentId, 'classified');
@@ -38,20 +45,18 @@ export async function ingestDocument(documentId: string): Promise<DocStatus> {
       if (!isExtractable(doc.docType)) {
         log.warn('document is unknown type; skipping field extraction');
         await DocumentsRepo.updateStatus(documentId, 'fields_extracted');
-      } else if (doc.docType === 'invoice') {
-        log.info('extracting invoice fields with bedrock');
-        const fields = await extractFields(text, 'invoice');
-        await FieldsRepo.upsertInvoice(documentId, fields);
-        await DocumentsRepo.updateStatus(documentId, 'fields_extracted');
-      } else if (doc.docType === 'contract') {
-        log.info('extracting contract fields with bedrock');
-        const fields = await extractFields(text, 'contract');
-        await FieldsRepo.upsertContract(documentId, fields);
-        await DocumentsRepo.updateStatus(documentId, 'fields_extracted');
-      } else if (doc.docType === 'cv') {
-        log.info('extracting cv fields with bedrock');
-        const fields = await extractFields(text, 'cv');
-        await FieldsRepo.upsertCv(documentId, fields);
+      } else {
+        log.info(`extracting ${doc.docType} fields via UTL_TO_GENERATE_TEXT`);
+        if (doc.docType === 'invoice') {
+          const fields = await extractFieldsInDb(text, 'invoice');
+          await FieldsRepo.upsertInvoice(documentId, fields);
+        } else if (doc.docType === 'contract') {
+          const fields = await extractFieldsInDb(text, 'contract');
+          await FieldsRepo.upsertContract(documentId, fields);
+        } else if (doc.docType === 'cv') {
+          const fields = await extractFieldsInDb(text, 'cv');
+          await FieldsRepo.upsertCv(documentId, fields);
+        }
         await DocumentsRepo.updateStatus(documentId, 'fields_extracted');
       }
       doc = (await DocumentsRepo.findById(documentId))!;

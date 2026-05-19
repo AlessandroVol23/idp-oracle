@@ -6,10 +6,8 @@ export interface AppConfig {
     connectString: string;
     user: string;
     password: string;
-  };
-  bedrock: {
-    modelId: string;
-    region: string;
+    walletLocation?: string;
+    walletPassword?: string;
   };
 }
 
@@ -20,15 +18,15 @@ function required(name: string): string {
 }
 
 export function readConfig(): AppConfig {
+  const walletLocation = process.env.ORACLE_WALLET_LOCATION;
+  const walletPassword = process.env.ORACLE_WALLET_PASSWORD;
   return {
     oracle: {
       connectString: required('ORACLE_CONNECT_STRING'),
       user: required('ORACLE_USER'),
       password: required('ORACLE_PASSWORD'),
-    },
-    bedrock: {
-      modelId: required('BEDROCK_MODEL_ID'),
-      region: process.env.AWS_REGION ?? 'us-east-1',
+      ...(walletLocation ? { walletLocation } : {}),
+      ...(walletPassword ? { walletPassword } : {}),
     },
   };
 }
@@ -40,10 +38,7 @@ export async function initConfig(): Promise<AppConfig> {
   if (!initialized) {
     await createPool(cfg.oracle);
     initialized = true;
-    logger.info('app config initialized', {
-      modelId: cfg.bedrock.modelId,
-      region: cfg.bedrock.region,
-    });
+    logger.info('app config initialized');
   }
   return cfg;
 }

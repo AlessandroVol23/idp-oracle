@@ -11,7 +11,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@idp/bedrock": "workspace:*",
     "@idp/db": "workspace:*",
     "@idp/logger": "workspace:*",
     "@idp/schemas": "workspace:*",

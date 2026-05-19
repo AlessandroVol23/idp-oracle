@@ -17,6 +17,7 @@
     "check": "pnpm lint && pnpm format:check && pnpm typecheck",
     "samples": "tsx scripts/generate-sample-docs.ts",
     "db:setup": "tsx scripts/db-setup.ts",
+    "db:setup-oci-credential": "tsx scripts/db-setup-oci-credential.ts",
     "db:onnx": "tsx scripts/upload-onnx-model.ts",
     "seed": "tsx scripts/seed.ts",
     "cdk": "pnpm --filter @idp/infrastructure cdk",
