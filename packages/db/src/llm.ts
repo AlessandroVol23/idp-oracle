@@ -77,8 +77,9 @@ export async function classifyInDb(text: string): Promise<ClassifyResult> {
   const raw = await generate(prompt, CLASSIFY_MAX_TOKENS);
   const obj = extractJsonObject(raw);
   const parsed = classificationResult.parse(obj);
-  const docType = parsed.confidence < CONFIDENCE_THRESHOLD ? 'unknown' : parsed.docType;
-  return { docType, confidence: parsed.confidence };
+  const confidence = parsed.confidence ?? 1;
+  const docType = confidence < CONFIDENCE_THRESHOLD ? 'unknown' : parsed.docType;
+  return { docType, confidence };
 }
 
 export async function extractFieldsInDb<T extends ExtractableDocType>(
