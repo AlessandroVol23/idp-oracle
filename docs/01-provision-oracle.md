@@ -1,91 +1,134 @@
-# Provisioning Oracle Autonomous AI Database 26ai (Always Free)
+# Provision Oracle Autonomous AI Database 26ai
 
-This walkthrough creates the cloud database the rest of the tutorial assumes. Takes ~5 minutes.
+The rest of the tutorial assumes you have a running 26ai instance with a wallet downloaded locally. This takes about 5 minutes.
 
 ## 1. Sign up for OCI Always Free
 
-Go to https://www.oracle.com/cloud/free/ and create a free OCI account. No credit card needed for Always Free resources.
+`https://www.oracle.com/cloud/free/` — Always Free covers one Autonomous Database, no credit card required for that tier. Pick a home region close to you (this repo was built against `eu-frankfurt-1`).
 
-## 2. Create the Autonomous Database
+## 2. Create the database
 
-1. Sign in to the OCI console: https://cloud.oracle.com
-2. Navigate to **Oracle Database → Autonomous Database**.
-3. Click **Create Autonomous Database**.
-4. Settings:
-   - **Display name**: `idp`
-   - **Workload type**: **AI** (this is the 26ai option)
-   - **Always Free**: ✓
-   - **Database version**: 26ai (the latest available)
-   - **Password**: pick a strong ADMIN password and save it — you'll need it.
-5. **Network access** — pick one:
-   - **Secure access from allowed IPs and VCNs** (recommended for this tutorial — no wallet needed)
-     - Add your current public IP to the ACL.
-   - *(Alternative)* **Secure access from everywhere** — easier but exposes the DB endpoint to the world; only for short-lived demos.
-6. Wait ~2 minutes for the instance to come up.
+OCI console → hamburger menu → **Oracle Database** → **Autonomous AI Database** → **Create Autonomous AI Database**.
 
-## 3. Get the connect string
+Settings that matter:
 
-1. From the DB detail page, click **Database connection**.
-2. **TLS authentication**: choose **TLS** (not mTLS).
-3. Copy the **TNS Name** for the `_high` service, e.g. `idp_high`.
-4. Copy the full connect string under **Connection Strings** — looks like:
-   ```
-   (description=(retry_count=20)(retry_delay=3)(address=(protocol=tcps)(port=1521)(host=adb.<region>.oraclecloud.com))(connect_data=(service_name=<long_id>_idp_high.adb.oraclecloud.com))(security=(ssl_server_dn_match=yes)))
-   ```
-5. Paste it into `.env` as `ORACLE_CONNECT_STRING`.
+| Field | Value |
+|---|---|
+| Display name | `idp` (or anything readable) |
+| Workload type | **Transaction Processing** |
+| Always Free | ON |
+| Choose database version | **26ai** (open the dropdown; the default is often `19c`, which does **not** have `VECTOR`, `DBMS_VECTOR_CHAIN`, or JSON Duality Views) |
+| Administrator password | Strong, unique. Save it in a password manager. You will need it for `ORACLE_ADMIN_PASSWORD` in `.env`. |
+| Access type | **Secure access from everywhere** |
+| Require mutual TLS (mTLS) | Required (auto-set by the previous choice) |
 
-The TNS-style descriptor works with `node-oracledb` thin mode out of the box — no wallet, no `TNS_ADMIN`.
+> Why "access from everywhere" and not the IP allowlist? Because the deploy target is Lambda, which has no static egress IP unless you put it in a VPC with a NAT Gateway. Lambda + ACL is more friction than Lambda + wallet, and the wallet's mTLS still keeps the database non-public in any meaningful sense.
 
-## 4. Create the `idp` application user
+Click **Create**, wait ~2 minutes for state `Available`.
 
-The repo migrations are owned by an `idp` user, not ADMIN.
+Verify on the detail page:
 
-1. From the DB detail page, click **Database actions** → **SQL**.
-2. Sign in as ADMIN with the password from step 2.
-3. Open `packages/db/migrations/000_bootstrap.sql` from this repo, paste it into the worksheet, **replace `<YOUR_IDP_PASSWORD>` with the password you want to use**, and run it.
-4. Set the same password as `ORACLE_PASSWORD` in `.env`. Set `ORACLE_USER=idp`.
+- **Database version** reads `26ai`. If it says `19c`, terminate and recreate with 26ai explicitly selected.
+- **Mutual TLS (mTLS) authentication** reads `Required`.
 
-## 5. Run the schema migrations
+## 3. Download the wallet
 
-From the repo root with your `.env` populated:
+DB detail page → **Database connection** → **Download wallet**.
+
+- Wallet type: **Instance Wallet** (smaller, single-DB).
+- Wallet password: set one (this protects the local files; it is not the ADMIN password). Save it.
+- Unzip the downloaded `Wallet_<DBNAME>.zip` to a stable location. Recommended:
+
+  ```bash
+  mkdir -p ~/.oci/wallet
+  unzip ~/Downloads/Wallet_*.zip -d ~/.oci/wallet
+  chmod 600 ~/.oci/wallet/*
+  ```
+
+The directory contains `cwallet.sso`, `ewallet.pem`, `tnsnames.ora`, `sqlnet.ora`, etc.
+
+## 4. Get the connect string
+
+Same **Database connection** screen.
+
+- TLS authentication: **Mutual TLS**.
+- Copy the connect string for the `_high` service. It looks like:
+
+  ```
+  (description= (retry_count=20)(retry_delay=3)(address=(protocol=tcps)(port=1522)(host=adb.<region>.oraclecloud.com))(connect_data=(service_name=<long_id>_<dbname>_high.adb.oraclecloud.com))(security=(ssl_server_dn_match=yes)))
+  ```
+
+## 5. Populate `.env`
+
+```bash
+cp .env.example .env
+```
+
+Fill in:
+
+```
+ORACLE_CONNECT_STRING="<the connect string from step 4, wrapped in quotes>"
+ORACLE_USER=idp
+ORACLE_PASSWORD="<password you'll use for the idp app user>"
+ORACLE_ADMIN_PASSWORD="<ADMIN password from step 2>"
+ORACLE_WALLET_LOCATION=/Users/<you>/.oci/wallet
+ORACLE_WALLET_PASSWORD="<the wallet password from step 3>"
+```
+
+Important: any value containing `#`, `$`, `*` or other shell-significant characters must be wrapped in double quotes. `dotenv` treats unquoted `#` as the start of a comment, which silently truncates passwords.
+
+## 6. Bootstrap schema, migrations, and duality views
 
 ```bash
 pnpm db:setup
 ```
 
-This runs `001_schema.sql` and `002_duality_views.sql` as the `idp` user.
+This runs in two phases:
 
-## 6. Load the ONNX embedding model
+1. As ADMIN, runs `000_bootstrap.sql` (creates the `idp` user, grants `DB_DEVELOPER_ROLE`, `EXECUTE` on `DBMS_VECTOR` / `DBMS_VECTOR_CHAIN`, `READ, WRITE` on `DATA_PUMP_DIR`).
+2. As `idp`, runs `001_schema.sql` (tables, vector index, text index, triggers) and `002_duality_views.sql` (one duality view per doc type + a no-fields top-level view).
 
-26ai generates embeddings *inside the database* from an ONNX model that lives in the DB. We use `all-MiniLM-L6-v2` (384 dimensions).
+After it finishes, `pnpm tsx scripts/verify-schema.ts` confirms all 11 objects exist.
 
-1. Download `all_MiniLM_L6_v2.onnx` from Oracle's pre-built model distribution. (Oracle publishes a packaged ONNX file ready for `DBMS_VECTOR.LOAD_ONNX_MODEL`.)
-2. Upload the file into the `DATA_PUMP_DIR` of your Autonomous Database. Easiest path: **Database Actions → Data Studio → Data Load → Cloud Store** or via the Object Storage console. (See the Autonomous DB docs for the exact upload UI flow.)
-3. Run:
-   ```bash
-   pnpm db:onnx
-   ```
-4. Expected output:
-   ```
-   OK. Embedding dimension = 384
-   ```
+## 7. Load the ONNX embedding model
 
-## 7. Smoke test from Node
+The repo automates both the download and the load:
 
 ```bash
-pnpm dev:api
-# in another terminal:
-curl http://localhost:8787/health
-# → {"ok":true}
+pnpm tsx scripts/download-onnx-to-db.ts   # DBMS_CLOUD.GET_OBJECT pulls all_MiniLM_L12_v2.onnx into DATA_PUMP_DIR
+pnpm db:onnx                              # DBMS_VECTOR.LOAD_ONNX_MODEL registers it as "doc_embedder"
 ```
 
-If you can hit `/health`, the connection pool initialized — meaning credentials + ACL + connect string are all good.
+Expected output of the second command:
+
+```
+OK. Embedding dimension = 384
+```
+
+> The L12 file is what Oracle publishes as a pre-built ONNX model today. It produces the same 384-dim output as L6, so the schema is unchanged. If you ever need a different file name, set `ONNX_MODEL_FILE` in `.env`.
+
+## 8. Smoke test
+
+```bash
+pnpm tsx scripts/ping-db.ts
+```
+
+Expected output:
+
+```
+Connected. Version: Oracle AI Database 26ai Enterprise Edition Release 23.26.2.2.0 - Production
+```
+
+If that prints, your credentials, wallet, and network path are all good.
+
+Next: set up OCI Generative AI for in-database classify + extract. See [02-provision-oci-genai.md](./02-provision-oci-genai.md).
 
 ## Troubleshooting
 
-| Symptom | Likely cause |
+| Symptom | Cause |
 |---|---|
-| `ORA-12506` / TLS handshake errors | Your IP isn't in the ACL. Edit the DB's network config and add it. |
-| `ORA-01017 invalid username/password` | Check `.env` matches the password you set in `000_bootstrap.sql`. |
-| `ORA-00942 table or view does not exist` | Migrations didn't run, or you're connected as the wrong user. Run `pnpm db:setup` with `ORACLE_USER=idp`. |
-| `pnpm db:onnx` fails with file-not-found | The ONNX file isn't in `DATA_PUMP_DIR`. List directory contents: `SELECT * FROM table(dbms_lock.sleep(0)) -- placeholder`, then use the Database Actions Data Load UI to upload. |
+| `Database version: 19c` on detail page | Workload + region defaults to 19c. Terminate, recreate, explicitly pick 26ai in the version dropdown. |
+| `ORA-01017 invalid username/password` | Password mismatch. `dotenv` treats `#` as a comment delimiter — quote the value. |
+| `NJS-505 unable to initiate TLS connection`, `bad decrypt` | `ORACLE_WALLET_PASSWORD` missing or wrong. node-oracledb thin mode decrypts `ewallet.pem` and needs the password set at wallet download. |
+| `pnpm db:setup` skipping the ADMIN bootstrap phase | Pass `--skip-bootstrap` only on re-runs when `idp` already exists. The default behavior bootstraps. |
+| `ORA-40666 qjsngenfullStrmJObj:4` selecting from a duality view | Known 26ai bug with nested subqueries in duality view projections (as of 23.26.2.2.0). The repo reads fields directly from `document_fields` instead — see `packages/db/src/repositories/fields.ts`. |
