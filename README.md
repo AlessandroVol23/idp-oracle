@@ -4,13 +4,15 @@ Companion code for the article [_Build an Intelligent Document Processor in One 
 
 Documents (invoices, contracts, CVs) go through this pipeline:
 
+![Ingest pipeline](./docs/ingest-process.png)
+
 1. **Upload** to a Hono API running on Lambda (Function URL).
 2. The file is stored as a `BLOB` in Oracle Database 26ai.
 3. `DBMS_VECTOR_CHAIN.UTL_TO_TEXT` extracts text **inside the database**.
 4. `DBMS_VECTOR_CHAIN.UTL_TO_SUMMARY` generates a deterministic gist **inside the database**.
-5. `DBMS_VECTOR_CHAIN.UTL_TO_GENERATE_TEXT` calls **OCI Generative AI** (Cohere Command R+) **from the database** to classify the document and extract typed JSON fields.
-6. Fields are written through a **JSON Duality View** — one row in `documents`, one in `document_fields`.
-7. `VECTOR_EMBEDDING` generates a 384-dim vector **inside the database** from an ONNX model loaded into Oracle.
+5. `VECTOR_EMBEDDING` produces a 384-dim vector **inside the database** from an ONNX model loaded into Oracle.
+6. A k-NN search over `VECTOR_DISTANCE` classifies the document by majority vote of its nearest labeled neighbors — no LLM call.
+7. `DBMS_VECTOR_CHAIN.UTL_TO_GENERATE_TEXT` calls **OCI Generative AI** (Cohere Command R+) **from the database** to extract typed JSON fields. Validated with Zod, written through a **JSON Duality View** into `documents` + `document_fields`.
 8. The frontend reads the doc, renders fields, and shows similar documents via `VECTOR_DISTANCE`.
 
 Everything _about_ the document lives in one Oracle 26ai instance — BLOB + extracted text + structured JSON + vector — and every AI step either runs inside the Oracle process or is initiated from it via `DBMS_VECTOR_CHAIN`. AWS provides only compute (Lambda + S3 + CloudFront).
