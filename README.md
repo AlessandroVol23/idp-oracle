@@ -1,6 +1,6 @@
 # Intelligent Document Processor — Oracle Database 26ai
 
-Companion code for the article _Build an Intelligent Document Processor in One Data Store_.
+Companion code for the article [_Build an Intelligent Document Processor in One Data Store_](./docs/article.md).
 
 Documents (invoices, contracts, CVs) go through this pipeline:
 
