@@ -9,5 +9,4 @@ cdk.out
 *.log
 .vite
 .playwright-cli/
-.claude/scheduled_tasks.lock
-.claude/worktrees/
+.claude/
