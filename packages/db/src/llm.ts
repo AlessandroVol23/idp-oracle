@@ -9,6 +9,7 @@ import {
   type FieldsByType,
 } from '@idp/schemas';
 import type { DocType } from '@idp/shared';
+import { logger } from '@idp/logger';
 
 const CREDENTIAL_NAME = 'OCI_CRED';
 const CLASSIFY_MAX_TOKENS = 200;
@@ -82,13 +83,15 @@ export async function classifyInDb(text: string): Promise<ClassifyResult> {
   return { docType, confidence };
 }
 
+const EXTRACT_RETRIES = 1;
+
 export async function extractFieldsInDb<T extends ExtractableDocType>(
   text: string,
   docType: T,
 ): Promise<FieldsByType[T]> {
   const schema = getFieldsSchema(docType);
   const jsonSchema = getJsonSchemaForType(docType);
-  const prompt = `You extract structured fields from a document. Respond with a single JSON object that matches the provided JSON Schema exactly. Fill missing fields with null where the schema allows; otherwise use a best-effort value. No prose, no markdown fences.
+  const basePrompt = `You extract structured fields from a document. Respond with a single JSON object that matches the provided JSON Schema exactly. EVERY field that is not explicitly marked nullable in the schema MUST be filled with a real value extracted or inferred from the document — never return null for required fields. No prose, no markdown fences.
 
 Document type: ${docType}
 JSON Schema:
@@ -96,7 +99,26 @@ ${JSON.stringify(jsonSchema)}
 
 Document text:
 ${text}`;
-  const raw = await generate(prompt, EXTRACT_MAX_TOKENS);
-  const obj = extractJsonObject(raw);
-  return (schema as z.ZodTypeAny).parse(obj) as FieldsByType[T];
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= EXTRACT_RETRIES; attempt++) {
+    const prompt =
+      attempt === 0
+        ? basePrompt
+        : `${basePrompt}\n\nYour previous attempt failed validation with: ${
+            (lastError as Error)?.message?.slice(0, 400) ?? 'unknown error'
+          }\nReturn a corrected JSON object now.`;
+    const raw = await generate(prompt, EXTRACT_MAX_TOKENS);
+    try {
+      const obj = extractJsonObject(raw);
+      return (schema as z.ZodTypeAny).parse(obj) as FieldsByType[T];
+    } catch (err) {
+      lastError = err;
+      logger.warn('extractFieldsInDb attempt failed', {
+        attempt: attempt + 1,
+        error: (err as Error).message.slice(0, 200),
+      });
+    }
+  }
+  throw lastError;
 }
