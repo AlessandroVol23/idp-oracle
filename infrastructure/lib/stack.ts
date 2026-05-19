@@ -10,7 +10,12 @@ import {
   ResponseHeadersPolicy,
 } from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
-import { Function, FunctionUrlAuthType, Runtime, Architecture, InvokeMode } from 'aws-cdk-lib/aws-lambda';
+import {
+  FunctionUrlAuthType,
+  Runtime,
+  Architecture,
+  InvokeMode,
+} from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction, OutputFormat } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { join, dirname } from 'node:path';
@@ -52,6 +57,7 @@ export class IdpStack extends Stack {
         minify: false,
         sourceMap: true,
         externalModules: ['oracledb'],
+        nodeModules: ['oracledb'],
         mainFields: ['module', 'main'],
         banner:
           "import { createRequire as topLevelCreateRequire } from 'module'; const require = topLevelCreateRequire(import.meta.url);",
@@ -82,14 +88,7 @@ export class IdpStack extends Stack {
 
     const fnUrl = apiFn.addFunctionUrl({
       authType: FunctionUrlAuthType.NONE,
-      invokeMode: InvokeMode.RESPONSE_STREAM,
-      cors: {
-        allowedOrigins: ['*'],
-        allowedMethods: [
-          (Function as unknown as { ALL?: unknown }).ALL as never,
-        ] as never[],
-        allowedHeaders: ['*'],
-      },
+      invokeMode: InvokeMode.BUFFERED,
     });
 
     const siteBucket = new Bucket(this, 'WebBucket', {
