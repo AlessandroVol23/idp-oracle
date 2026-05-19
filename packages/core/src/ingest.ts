@@ -1,9 +1,10 @@
-import { DocumentsRepo, FieldsRepo, classifyInDb, extractFieldsInDb } from '@idp/db';
+import { DocumentsRepo, FieldsRepo, extractFieldsInDb } from '@idp/db';
 import { logger } from '@idp/logger';
 import { isExtractable } from '@idp/schemas';
 import type { DocStatus } from '@idp/shared';
 
 const MIN_TEXT_LENGTH = 50;
+const KNN_K = 5;
 
 export async function ingestDocument(documentId: string): Promise<DocStatus> {
   const log = logger.child({ documentId });
@@ -32,9 +33,24 @@ export async function ingestDocument(documentId: string): Promise<DocStatus> {
     }
 
     if (doc.status === 'text_extracted') {
-      log.info('classifying via UTL_TO_GENERATE_TEXT');
-      const result = await classifyInDb(doc.extractedText ?? '');
-      log.info('classified', { docType: result.docType, confidence: result.confidence });
+      log.info('generating embedding via VECTOR_EMBEDDING');
+      await DocumentsRepo.setEmbedding(documentId);
+      await DocumentsRepo.updateStatus(documentId, 'embedded');
+      doc = (await DocumentsRepo.findById(documentId))!;
+    }
+
+    if (doc.status === 'embedded') {
+      log.info(`classifying via k-NN vector search (k=${KNN_K})`);
+      const result = await DocumentsRepo.classifyByVector(documentId, KNN_K);
+      log.info('classified', {
+        docType: result.docType,
+        confidence: result.confidence,
+        neighbors: result.neighbors.map((n) => ({
+          docType: n.docType,
+          distance: Number(n.distance.toFixed(4)),
+          filename: n.filename,
+        })),
+      });
       await DocumentsRepo.updateDocType(documentId, result.docType);
       await DocumentsRepo.updateStatus(documentId, 'classified');
       doc = (await DocumentsRepo.findById(documentId))!;
@@ -63,13 +79,6 @@ export async function ingestDocument(documentId: string): Promise<DocStatus> {
     }
 
     if (doc.status === 'fields_extracted') {
-      log.info('generating embedding via DBMS_VECTOR_CHAIN');
-      await DocumentsRepo.setEmbedding(documentId);
-      await DocumentsRepo.updateStatus(documentId, 'embedded');
-      doc = (await DocumentsRepo.findById(documentId))!;
-    }
-
-    if (doc.status === 'embedded') {
       await DocumentsRepo.updateStatus(documentId, 'done');
       log.info('ingest done');
       return 'done';

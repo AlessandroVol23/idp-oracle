@@ -195,6 +195,53 @@ export const DocumentsRepo = {
     });
   },
 
+  async classifyByVector(
+    id: string,
+    k = 5,
+    unknownThreshold = 0.5,
+  ): Promise<{
+    docType: DocType;
+    confidence: number;
+    neighbors: { docType: DocType; distance: number; filename: string }[];
+  }> {
+    return withConnection(async (conn) => {
+      const result = await conn.execute<{
+        DOC_TYPE: string;
+        DISTANCE: number;
+        ORIGINAL_FILENAME: string;
+      }>(
+        `SELECT b.doc_type AS DOC_TYPE,
+                b.original_filename AS ORIGINAL_FILENAME,
+                VECTOR_DISTANCE(a.embedding, b.embedding, COSINE) AS DISTANCE
+         FROM documents a, documents b
+         WHERE a.id = HEXTORAW(:id)
+           AND b.id != HEXTORAW(:id)
+           AND b.embedding IS NOT NULL
+           AND b.doc_type IN ('invoice', 'contract', 'cv')
+           AND b.status = 'done'
+         ORDER BY DISTANCE
+         FETCH FIRST :k ROWS ONLY`,
+        { id, k },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      const neighbors = (result.rows ?? []).map((r) => ({
+        docType: r.DOC_TYPE as DocType,
+        distance: Number(r.DISTANCE),
+        filename: r.ORIGINAL_FILENAME,
+      }));
+      if (neighbors.length === 0 || (neighbors[0] && neighbors[0].distance > unknownThreshold)) {
+        return { docType: 'unknown' as DocType, confidence: 0, neighbors };
+      }
+      const counts: Record<string, number> = {};
+      for (const n of neighbors) counts[n.docType] = (counts[n.docType] ?? 0) + 1;
+      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+      const winner = sorted[0]![0] as DocType;
+      const winnerCount = sorted[0]![1];
+      const confidence = winnerCount / neighbors.length;
+      return { docType: winner, confidence, neighbors };
+    });
+  },
+
   async findSimilar(id: string, k: number): Promise<SimilarDocument[]> {
     return withConnection(async (conn) => {
       const result = await conn.execute<Record<string, unknown>>(
