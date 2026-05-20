@@ -23,7 +23,7 @@ After the key is added, OCI shows a **configuration file preview** on the same s
 ```ini
 [DEFAULT]
 user=ocid1.user.oc1..aaaaaaaa....
-fingerprint=6a:bc:31:32:11:b8:2a:08:7c:9b:62:50:83:4d:46:40
+fingerprint=aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99
 tenancy=ocid1.tenancy.oc1..aaaaaaaa....
 region=eu-frankfurt-1
 key_file=<path to your private keyfile> # TODO
